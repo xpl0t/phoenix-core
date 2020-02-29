@@ -11,7 +11,8 @@
                 "phoenix-core",
                 "--debug",
                 "-l",
-                "pcap"
+                "pcap",
+                "-lpthread"
             ],
             "group": {
                 "kind": "build",

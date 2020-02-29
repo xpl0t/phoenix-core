@@ -34,7 +34,7 @@ void printIP(unsigned char *ip) {
    }
 }
 
-u_int getIpOfInterface(u_char *interface) {
+u_int getIpOfInterface(char *interface) {
    struct ifaddrs *ifaddr, *ifa;
 
    if (getifaddrs(&ifaddr) == -1) 
@@ -55,7 +55,7 @@ u_int getIpOfInterface(u_char *interface) {
    return 0;
 }
 
-void getMacOfInterface(u_char *interface, u_char *mac) {
+void getMacOfInterface(char *interface, u_char *mac) {
    int s, i;
    struct ifreq ifr;
    s = socket(AF_INET, SOCK_DGRAM, 0);
