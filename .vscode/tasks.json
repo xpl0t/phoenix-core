@@ -1,0 +1,22 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build with Clang",
+            "type": "shell",
+            "command": "clang",
+            "args": [
+                "main.c",
+                "-o",
+                "phoenix-core",
+                "--debug",
+                "-l",
+                "pcap"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        }
+    ]
+}

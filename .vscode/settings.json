@@ -1,0 +1,10 @@
+{
+    "files.associations": {
+        "stdio.h": "c",
+        "hacking.h": "c",
+        "hacking-network.h": "c",
+        "io.h": "c",
+        "socket.h": "c",
+        "arp.h": "c"
+    }
+}
