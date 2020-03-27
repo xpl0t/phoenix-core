@@ -18,12 +18,17 @@
 
 #include "target-guard.h"
 
-int main(void) {
+int main(int argc, char* argv[]) {
    int i;
-   char *dev = "wlp0s26u1u6";
    struct target *targets = malloc(0);
    u_int targetsLen = 0;
+   
+   if (argc < 2) {
+      printf("Specify the network device you want to use.");
+      return -1;
+   }
 
+   char *dev = argv[1];
    printf("Using interface %s", dev);
 
    u_int hostIp = getIpOfInterface(dev);
