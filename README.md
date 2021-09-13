@@ -1,6 +1,8 @@
 # PhOeNiX
 Linux console tool to mislead internet packets in the local network targeting the gateway.
 
+**Disclaimer!! This tool will send ARP response packets stating, that the gateway ip is at a MAC address that does not exist. No device except the device running the attack will have a working connection to the internet. Only use this tool if you know what you are doing and only run this on your own network. I wont take any responsiblity for your actions.**
+
 ## Compile with gcc
 
 The gcc compiler is preinstalled on many distributions.
