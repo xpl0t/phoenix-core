@@ -14,8 +14,8 @@
 #include <net/if.h>
 #include <unistd.h>
 
-#include "hacking.h"
-#include "hacking-network.h"
+#include "utils.h"
+#include "network-utils.h"
 
 #define ARP_REQUEST 1
 #define ARP_REPLY 2

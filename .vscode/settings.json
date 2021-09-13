@@ -1,8 +1,8 @@
 {
     "files.associations": {
         "stdio.h": "c",
-        "hacking.h": "c",
-        "hacking-network.h": "c",
+        "utils.h": "c",
+        "network-utils.h": "c",
         "io.h": "c",
         "socket.h": "c",
         "arp.h": "c",
